@@ -1,103 +1,148 @@
--- Crie o banco de dados e selecione-o (caso ainda não exista)
-CREATE DATABASE IF NOT EXISTS sales_db;
-USE sales_db;
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, Numeric, ForeignKey, CheckConstraint, Index, text
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.sql import func
+from datetime import datetime
 
--- ========================================
--- Tabela Cliente
--- ========================================
-CREATE TABLE IF NOT EXISTS cliente (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    nome VARCHAR(255) NOT NULL,
-    torce_flamengo BOOLEAN NOT NULL DEFAULT FALSE,
-    assiste_one_piece BOOLEAN NOT NULL DEFAULT FALSE,
-    e_de_sousa BOOLEAN NOT NULL DEFAULT FALSE,
-    email VARCHAR(255),
-    telefone VARCHAR(50)
-) ENGINE=InnoDB;
+Base = declarative_base()
 
--- ========================================
--- Tabela Produto
--- ========================================
-CREATE TABLE IF NOT EXISTS produto (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    nome VARCHAR(255) NOT NULL,
-    preco DECIMAL(10,2) NOT NULL,
-    categoria VARCHAR(100),
-    fabricado_em_mari BOOLEAN NOT NULL DEFAULT FALSE,
-    estoque INT NOT NULL,
-    CONSTRAINT chk_estoque CHECK (estoque >= 0)
-) ENGINE=InnoDB;
+# ========================================
+# Configuração do Banco de Dados
+# ========================================
+engine = create_engine('mysql+mysqlconnector://root@localhost/sales_db', echo=True)
+Session = sessionmaker(bind=engine)
+session = Session()
 
--- Índices para facilitar buscas por nome e categoria
-CREATE INDEX idx_produto_nome ON produto(nome);
-CREATE INDEX idx_produto_categoria ON produto(categoria);
-CREATE INDEX idx_produto_fabricado ON produto(fabricado_em_mari);
+# ========================================
+# Modelo Cliente
+# ========================================
+class Cliente(Base):
+    __tablename__ = 'cliente'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nome = Column(String(255), nullable=False)
+    cpf = Column(String(20), nullable=False)            # Novo: CPF para login (senha)
+    vendedor = Column(Boolean, nullable=False, default=False)  # Novo: Indica se é vendedor
+    torce_flamengo = Column(Boolean, nullable=False, default=False)
+    assiste_one_piece = Column(Boolean, nullable=False, default=False)
+    e_de_sousa = Column(Boolean, nullable=False, default=False)
+    email = Column(String(255))
+    telefone = Column(String(50))
+    
+    compras = relationship('Compra', back_populates='cliente')
 
--- ========================================
--- Tabela Vendedor
--- ========================================
-CREATE TABLE IF NOT EXISTS vendedor (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    nome VARCHAR(255) NOT NULL
-) ENGINE=InnoDB;
+# ========================================
+# Modelo Produto
+# ========================================
+class Produto(Base):
+    __tablename__ = 'produto'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nome = Column(String(255), nullable=False)
+    preco = Column(Numeric(10,2), nullable=False)
+    categoria = Column(String(100))
+    fabricado_em_mari = Column(Boolean, nullable=False, default=False)
+    estoque = Column(Integer, nullable=False)
+    
+    __table_args__ = (
+        CheckConstraint('estoque >= 0', name='chk_estoque'),
+        Index('idx_produto_nome', 'nome'),
+        Index('idx_produto_categoria', 'categoria'),
+        Index('idx_produto_fabricado', 'fabricado_em_mari')
+    )
+    
+    itens_compra = relationship('ItemCompra', back_populates='produto')
 
--- ========================================
--- Tabela Compra
--- ========================================
-CREATE TABLE IF NOT EXISTS compra (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    cliente_id INT NOT NULL,
-    vendedor_id INT NOT NULL,
-    data_compra DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    forma_pagamento VARCHAR(50) NOT NULL,
-    status_pagamento VARCHAR(50) NOT NULL DEFAULT 'Pendente',
-    total DECIMAL(10,2) NOT NULL DEFAULT 0,
-    FOREIGN KEY (cliente_id) REFERENCES cliente(id) ON DELETE CASCADE,
-    FOREIGN KEY (vendedor_id) REFERENCES vendedor(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
+# ========================================
+# Modelo Vendedor
+# ========================================
+class Vendedor(Base):
+    __tablename__ = 'vendedor'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    nome = Column(String(255), nullable=False)
+    
+    vendas = relationship('Compra', back_populates='vendedor')
 
--- ========================================
--- Tabela Item da Compra
--- ========================================
-CREATE TABLE IF NOT EXISTS item_compra (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    compra_id INT NOT NULL,
-    produto_id INT NOT NULL,
-    quantidade INT NOT NULL,
-    preco_unitario DECIMAL(10,2) NOT NULL,
-    FOREIGN KEY (compra_id) REFERENCES compra(id) ON DELETE CASCADE,
-    FOREIGN KEY (produto_id) REFERENCES produto(id) ON DELETE RESTRICT
-) ENGINE=InnoDB;
+# ========================================
+# Modelo Compra
+# ========================================
+class Compra(Base):
+    __tablename__ = 'compra'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cliente_id = Column(Integer, ForeignKey('cliente.id', ondelete='CASCADE'), nullable=False)
+    vendedor_id = Column(Integer, ForeignKey('vendedor.id', ondelete='CASCADE'), nullable=False)
+    data_compra = Column(DateTime, nullable=False, server_default=func.now())
+    forma_pagamento = Column(String(50), nullable=False)
+    status_pagamento = Column(String(50), nullable=False, default='Pendente')
+    total = Column(Numeric(10,2), nullable=False, default=0)
+    
+    cliente = relationship('Cliente', back_populates='compras')
+    vendedor = relationship('Vendedor', back_populates='vendas')
+    itens = relationship('ItemCompra', back_populates='compra')
 
--- ========================================
--- View para Vendas por Vendedor (Mensal)
--- ========================================
-DROP VIEW IF EXISTS vw_vendas_vendedor;
-CREATE VIEW vw_vendas_vendedor AS 
-SELECT 
-    v.nome AS vendedor,
-    MONTH(c.data_compra) AS mes,
-    SUM(c.total) AS total_vendas
-FROM compra c
-JOIN vendedor v ON c.vendedor_id = v.id
-GROUP BY v.nome, mes;
+# ========================================
+# Modelo ItemCompra
+# ========================================
+class ItemCompra(Base):
+    __tablename__ = 'item_compra'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    compra_id = Column(Integer, ForeignKey('compra.id', ondelete='CASCADE'), nullable=False)
+    produto_id = Column(Integer, ForeignKey('produto.id', ondelete='RESTRICT'), nullable=False)
+    quantidade = Column(Integer, nullable=False)
+    preco_unitario = Column(Numeric(10,2), nullable=False)
+    
+    compra = relationship('Compra', back_populates='itens')
+    produto = relationship('Produto', back_populates='itens_compra')
 
--- ========================================
--- Stored Procedure para Relatório Mensal de Vendas
--- ========================================
-DELIMITER //
-
-DROP PROCEDURE IF EXISTS relatorio_vendas_mensal;
-CREATE PROCEDURE relatorio_vendas_mensal()
-BEGIN
+# ========================================
+# Criação das Views e Procedures
+# ========================================
+def create_database_objects():
+    # Criação da View
+    view_sql = """
+    CREATE OR REPLACE VIEW vw_vendas_vendedor AS 
     SELECT 
         v.nome AS vendedor,
         MONTH(c.data_compra) AS mes,
         SUM(c.total) AS total_vendas
-    FROM compra c 
+    FROM compra c
     JOIN vendedor v ON c.vendedor_id = v.id
-    WHERE MONTH(c.data_compra) = MONTH(CURRENT_DATE())
-    GROUP BY v.nome;
-END //
+    GROUP BY v.nome, mes;
+    """
+    
+    # Criação da Stored Procedure
+    procedure_sql = """
+    CREATE PROCEDURE relatorio_vendas_mensal()
+    BEGIN
+        SELECT 
+            v.nome AS vendedor,
+            MONTH(c.data_compra) AS mes,
+            SUM(c.total) AS total_vendas
+        FROM compra c 
+        JOIN vendedor v ON c.vendedor_id = v.id
+        WHERE MONTH(c.data_compra) = MONTH(CURRENT_DATE())
+        GROUP BY v.nome;
+    END
+    """
+    
+    try:
+        # Executa os comandos SQL diretamente
+        with engine.connect() as conn:
+            conn.execute(text(view_sql))
+            conn.execute(text("DROP PROCEDURE IF EXISTS relatorio_vendas_mensal"))
+            conn.execute(text(procedure_sql))
+        print("Objetos de banco criados com sucesso!")
+    except Exception as e:
+        print(f"Erro ao criar objetos: {e}")
 
-DELIMITER ;
+# ========================================
+# Execução Inicial
+# ========================================
+if __name__ == '__main__':
+    # Cria todas as tabelas
+    Base.metadata.create_all(engine)
+    
+    # Cria views e procedures
+    create_database_objects()

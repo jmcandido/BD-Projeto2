@@ -47,10 +47,11 @@ from typing import List
 class Cliente:
     id: int = None
     nome: str = ""
+    cpf: str = ""           # Novo atributo: CPF para login (será a senha)
+    vendedor: bool = False  # Novo atributo: Indica se é vendedor
     torce_flamengo: bool = False
     assiste_one_piece: bool = False
     e_de_sousa: bool = False
-    # Outros atributos (ex.: email, telefone) podem ser adicionados
 
 @dataclass
 class Produto:
